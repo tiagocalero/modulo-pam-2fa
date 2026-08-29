@@ -35,7 +35,7 @@ const char *totp_algo_name(int algo) {
 }
 
 /* libera memoria */
-void totp_wine(void *p, size_t n) {
+void totp_wipe(void *p, size_t n) {
     if (p != NULL && n > 0) explicit_bzero(p, n);
 }
 

@@ -1,7 +1,7 @@
 /* totp-admin.c  Genera el seed TOTP del usuario que lo ejecuta.
  *
  * Cada usuario corre 'totp-admin' en su propia sesion y queda dado de alta.
- * Para dar de baja a alguien, el administrador borra su archivo ~/.totp
+ * Para dar de baja a alguien, el administrador borra su archivo ~/.totp_auth
  */
 
 #define _GNU_SOURCE
@@ -32,7 +32,7 @@ static int draw_qr(const char *uri) {
     if (pid < 0) return -1;
 
     if (pid == 0) {
-        execlp("qrencode", "qrencode", "-t", "ANSIUTF8", "-m", "1", "-o", "-", uri, (char *) NULL);
+        execlp("qrencode", "qrencode", "-t", "ANSIUTF8", "-o", "-", uri, (char *) NULL);
         _exit(127);   /* execlp solo retorna si fallo */
     }
     if (waitpid(pid, &status, 0) < 0) return -1;
