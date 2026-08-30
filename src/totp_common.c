@@ -417,14 +417,13 @@ totp_err_t totp_check_scratch(totp_cfg_t *cfg, const char *code) {
 totp_err_t totp_rate(const totp_params_t *params, totp_cfg_t *cfg, time_t now) {
     if (params == NULL || cfg == NULL) return TOTP_OK;
 
-    /* ventana vencida, o marca del futuro (el admin atraso el reloj):
-     * empezamos una ventana nueva. Sin el chequeo del futuro, una marca
-     * adelantada nunca venceria y el usuario quedaria bloqueado. */
-    if (now < cfg->rate_start || now - cfg->rate_start >= params->rl_window) {
-        cfg->rate_start = now;
+    /* la ventana se reinicia solo despues de rl_window segundos SIN
+     * intentos. Si el usuario sigue probando, el contador sigue vivo. */
+    if (now < cfg->rate_start || now - cfg->rate_start >= params->rl_window) 
         cfg->rate_count = 0;
-    }
 
+    /* poniendo esa linea fuera del if aseguramos que la ventana se reinicia luego de cada intento */
+    cfg->rate_start = now;
     cfg->rate_count++;
 
     return (cfg->rate_count > params->rl_attempts) ? TOTP_ERR_RATE : TOTP_OK;
