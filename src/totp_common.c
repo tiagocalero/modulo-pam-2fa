@@ -164,21 +164,39 @@ totp_err_t totp_params_load(const char *path, totp_params_t *params) {
 }
 
 /* Estado del usuario en ~/.totp_auth
- *
- * Formato:
- *     <seed en Base32>
- *     " TOTP_AUTH
- *     " LAST_COUNTER 59598195      <- anti-replay
- *     " RATE 1788017607 2          <- inicio de ventana e intentos
- *     61204634                     <- codigos de recuperacion
- */
+  Formato:
+    " TOTP_ENC 1
+    " SALT b7a66d56279915afbaf2a2d015599ff0    <- sal del KDF
+    " NONCE 460e2d31aaec068dfe778b8a           <- nonce de GCM
+    " TAG 22bb41f6c196296f15892ad2b07712ee     <- etiqueta de autenticación
+    " DATA def1d536ea7e71473aeffce2390a0a...   <- seed + códigos de recuperacion (cifrados)
+    " LAST_COUNTER 0                           <- anti-replay
+    " RATE 0 0                                 <- rate-limiting (inicio de ventana e intentos)
+*/
 
-totp_err_t totp_load(const char *path, uid_t owner, totp_cfg_t *cfg) {
+/* conversion hexadecimal */
+/* el bloque cifrado son bytes crudos y el archivo es de texto */
+static void bin2hex(const unsigned char *in, size_t n, char *out) {
+    size_t i;
+    for (i = 0; i < n; i++) sprintf(out + i * 2, "%02x", in[i]);
+}
+
+/* devuelve los bytes escritos, o 0 si no es hexadecimal valido */
+static size_t hex2bin(const char *in, unsigned char *out, size_t cap) {
+    size_t len = strlen(in), i;
+    if (len == 0 || len % 2 != 0 || len / 2 > cap) return 0;
+    for (i = 0; i < len / 2; i++)
+        if (sscanf(in + i * 2, "%2hhx", &out[i]) != 1) return 0;
+
+    return len / 2;
+}
+
+totp_err_t totp_load(const char *path, uid_t owner, const char *pass, totp_cfg_t *cfg) {
     int fd;
     FILE *fp;
     struct stat st;
     char line[TOTP_MAX_LINE];
-    int have_secret = 0;
+    int tiene_data = 0;
 
     if (path == NULL || cfg == NULL) return TOTP_ERR_IO;
 
@@ -209,20 +227,33 @@ totp_err_t totp_load(const char *path, uid_t owner, totp_cfg_t *cfg) {
         return TOTP_ERR_IO;
     }
 
+    /* lee el archivo linea por linea */
     while (fgets(line, sizeof line, fp) != NULL) {
         char *nl;
-
         if ((nl = strpbrk(line, "\r\n")) != NULL) *nl = '\0';
-        if (line[0] == '\0') continue;
 
-        /* primera linea no vacia es la seed. */
-        if (!have_secret) {
-            if (strlen(line) >= sizeof cfg->secret) {
+        if (strncmp(line, "\" SALT ", 7) == 0) {
+            if (hex2bin(line + 7, cfg->salt, TOTP_SALT_LEN) != TOTP_SALT_LEN) {
                 fclose(fp);
                 return TOTP_ERR_FORMAT;
             }
-            strcpy(cfg->secret, line);
-            have_secret = 1;
+        } else if (strncmp(line, "\" NONCE ", 8) == 0) {
+            if (hex2bin(line + 8, cfg->nonce, TOTP_NONCE_LEN) != TOTP_NONCE_LEN) {
+                fclose(fp);
+                return TOTP_ERR_FORMAT;
+            }
+        } else if (strncmp(line, "\" TAG ", 6) == 0) {
+            if (hex2bin(line + 6, cfg->tag, TOTP_TAG_LEN) != TOTP_TAG_LEN) {
+                fclose(fp);
+                return TOTP_ERR_FORMAT;
+            }
+        } else if (strncmp(line, "\" DATA ", 7) == 0) {
+            cfg->bloblen = hex2bin(line + 7, cfg->blob, sizeof cfg->blob);
+            if (cfg->bloblen == 0) {
+                fclose(fp);
+                return TOTP_ERR_FORMAT;
+            }
+            tiene_data = 1;
         } else if (strncmp(line, "\" LAST_COUNTER ", 15) == 0) {
             cfg->last_counter = strtoll(line + 15, NULL, 10);
         } else if (strncmp(line, "\" RATE ", 7) == 0) {
@@ -233,17 +264,17 @@ totp_err_t totp_load(const char *path, uid_t owner, totp_cfg_t *cfg) {
                 cfg->rate_count = n;
             }
         }
-        /* linea numerica del largo justo: codigo de recuperacion. */
-        else if (isdigit((unsigned char) line[0]) && strlen(line) == TOTP_SCRATCH_LEN
-                 && cfg->n_scratch < TOTP_SCRATCH_N) {
-            strcpy(cfg->scratch[cfg->n_scratch], line);
-            cfg->n_scratch++;
-        }
         /* cualquier otra linea se ignora */
     }
     fclose(fp);
 
-    if (!have_secret || !is_string_valid_b32(cfg->secret)) {
+    if (!tiene_data) return TOTP_ERR_FORMAT;
+
+    /* Descifrar, devuelve TOTP_ERR_PERM si la contrasenia no es la correcta o si alguien altero el archivo */
+    return totp_decrypt(pass, cfg);
+    fclose(fp);
+
+    if (!tiene_data || !is_string_valid_b32(cfg->secret)) {
         totp_wipe(cfg, sizeof *cfg);
         return TOTP_ERR_FORMAT;
     }
@@ -251,40 +282,73 @@ totp_err_t totp_load(const char *path, uid_t owner, totp_cfg_t *cfg) {
     return TOTP_OK;
 }
 
-/* guarda la configuracion de cfg en el archivo */
-totp_err_t totp_save(const char *path, const totp_cfg_t *cfg) {
-    int fd, i;
+/* guarda la configuracion de cfg en el archivo
+ *
+ * Con pass != NULL vuelve a cifrar el bloque (necesario para generar el
+ * seed y tmb cuando se usa un codigo de recuperacion).
+ * Con pass == NULL conserva el bloque y solo actualiza los contadores
+ * Asi no se genera un nonce nuevo en cada intento */
+totp_err_t totp_save(const char *path, const char *pass, const totp_cfg_t *cfg) {
+    totp_cfg_t tmp;
+    const totp_cfg_t *w = cfg;
+    char hex[TOTP_BLOB_MAX * 2 + 1];
+    int fd;
     FILE *fp;
+    totp_err_t rc = TOTP_OK;
 
     if (path == NULL || cfg == NULL) return TOTP_ERR_IO;
 
-    fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, S_IRUSR | S_IWUSR);
-    if (fd < 0) return TOTP_ERR_IO;
+    if (pass != NULL) {
+        memcpy(&tmp, cfg, sizeof tmp);
+        rc = totp_encrypt(pass, &tmp);
+        if (rc != TOTP_OK) {
+            totp_wipe(&tmp, sizeof tmp);
+            return rc;
+        }
+        w = &tmp;
+    } else if (cfg->bloblen == 0) {
+        return TOTP_ERR_FORMAT;   /* nada cifrado que conservar */
+    }
 
-    /* Si el archivo ya existia 'open()' no cambia su modo,
-     * y al crearlo el umask puede haberlo aflojado. Lo forzamos a 0600. */
+    fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, S_IRUSR | S_IWUSR);
+    if (fd < 0) {
+        rc = TOTP_ERR_IO;
+        goto fin;
+    }
+
+    /* si el archivo ya existia 'open()' no cambia su modo, y al crearlo el
+     * umask puede haberlo aflojado, lo forzamos a 0600 */
     if (fchmod(fd, S_IRUSR | S_IWUSR) != 0) {
         close(fd);
-        return TOTP_ERR_IO;
+        rc = TOTP_ERR_IO;
+        goto fin;
     }
 
     fp = fdopen(fd, "w");
     if (fp == NULL) {
         close(fd);
-        return TOTP_ERR_IO;
+        rc = TOTP_ERR_IO;
+        goto fin;
     }
 
-    /* escribe la config */
-    fprintf(fp, "%s\n", cfg->secret);
-    fprintf(fp, "\" TOTP_AUTH\n");
+    /* escribimos los parametros */
+    fprintf(fp, "\" TOTP_ENC 1\n");
+    bin2hex(w->salt, TOTP_SALT_LEN, hex);
+    fprintf(fp, "\" SALT %s\n", hex);
+    bin2hex(w->nonce, TOTP_NONCE_LEN, hex);
+    fprintf(fp, "\" NONCE %s\n", hex);
+    bin2hex(w->tag, TOTP_TAG_LEN, hex);
+    fprintf(fp, "\" TAG %s\n", hex);
+    bin2hex(w->blob, w->bloblen, hex);
+    fprintf(fp, "\" DATA %s\n", hex);
     fprintf(fp, "\" LAST_COUNTER %lld\n", (long long) cfg->last_counter);
     fprintf(fp, "\" RATE %lld %d\n", (long long) cfg->rate_start, cfg->rate_count);
-    for (i = 0; i < cfg->n_scratch; i++)
-        fprintf(fp, "%s\n", cfg->scratch[i]);
 
-    if (fclose(fp) != 0) return TOTP_ERR_IO;
+    if (fclose(fp) != 0) rc = TOTP_ERR_IO;
 
-    return TOTP_OK;
+fin:  /* borra 'tmp' que contiene el seed sin cifrar */
+    if (pass != NULL) totp_wipe(&tmp, sizeof tmp);
+    return rc;
 }
 
 /* Generacion de la seed */

@@ -26,11 +26,11 @@ CONFFILE ?= /etc/totp.conf
 
 all: $(MODULE) $(TOOL)
 
-$(MODULE): $(SRC)/pam_totp.c $(SRC)/totp_common.c $(SRC)/totp_common.h
-	$(CC) $(CFLAGS) -fPIC -shared -o $@ $(SRC)/pam_totp.c $(SRC)/totp_common.c -lpam -lcotp
+$(MODULE): $(SRC)/pam_totp.c $(SRC)/totp_common.c $(SRC)/totp_crypto.c $(SRC)/totp_common.h
+	$(CC) $(CFLAGS) -fPIC -shared -o $@ $(SRC)/pam_totp.c $(SRC)/totp_common.c $(SRC)/totp_crypto.c -lpam -lcotp -lgcrypt
 
-$(TOOL): $(SRC)/totp-admin.c $(SRC)/totp_common.c $(SRC)/totp_common.h
-	$(CC) $(CFLAGS) -o $@ $(SRC)/totp-admin.c $(SRC)/totp_common.c -lcotp
+$(TOOL): $(SRC)/totp-admin.c $(SRC)/totp_common.c $(SRC)/totp_crypto.c $(SRC)/totp_common.h
+	$(CC) $(CFLAGS) -o $@ $(SRC)/totp-admin.c $(SRC)/totp_common.c $(SRC)/totp_crypto.c -lcotp -lgcrypt
 
 install: all
 	@if [ "$$(id -u)" != "0" ]; then echo "ERROR: usa sudo"; exit 1; fi

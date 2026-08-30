@@ -36,6 +36,14 @@
 #define TOTP_SCRATCH_LEN 8
 #define TOTP_MAX_LINE 256
 
+/* cifrado del seed */
+#define TOTP_SALT_LEN 16   /* sal del KDF */
+#define TOTP_NONCE_LEN 12   /* nonce de AES-GCM */
+#define TOTP_TAG_LEN 16   /* etiqueta de autenticacion de GCM */
+#define TOTP_KEY_LEN 32   /* AES-256 */
+#define TOTP_PBKDF2_ITER 200000 /* cantidad de iteraciones que definimos */
+#define TOTP_BLOB_MAX 256   /* seed + codigos de recuperacion en claro */
+
 typedef enum {
     TOTP_OK = 0,
     TOTP_ERR_NOENT,
@@ -75,13 +83,19 @@ typedef struct {
     int rate_count; /* intentos contados en la ventana */
     char scratch[TOTP_SCRATCH_N][TOTP_SCRATCH_LEN + 1];
     int n_scratch;
+
+    unsigned char salt[TOTP_SALT_LEN];
+    unsigned char nonce[TOTP_NONCE_LEN];
+    unsigned char tag[TOTP_TAG_LEN];
+    unsigned char blob[TOTP_BLOB_MAX];
+    size_t bloblen;
 } totp_cfg_t;
 
 /* arma <home>/.totp_auth en out. Devuelve 0 si entro, -1 si no. */
 int totp_path(char *out, size_t cap, const char *home);
 
-totp_err_t totp_load(const char *path, uid_t owner, totp_cfg_t *cfg);
-totp_err_t totp_save(const char *path, const totp_cfg_t *cfg);
+totp_err_t totp_load(const char *path, uid_t owner, const char *pass, totp_cfg_t *cfg);
+totp_err_t totp_save(const char *path, const char *pass, const totp_cfg_t *cfg);
 totp_err_t totp_generate(totp_cfg_t *cfg);
 
 totp_err_t totp_check_code(const totp_params_t *params, const totp_cfg_t *cfg,
@@ -93,5 +107,17 @@ totp_err_t totp_rate(const totp_params_t *params, totp_cfg_t *cfg, time_t now);
 
 int totp_ct_equal(const char *a, const char *b, size_t n);
 void totp_wipe(void *p, size_t n);
+
+/* cifrado (totp_crypto.c) */
+
+/* inicializa libgcrypt */
+void totp_crypto_init(void);
+
+/* cifra cfg->secret y cfg->scratch en cfg->blob, generando sal y nonce nuevos */
+totp_err_t totp_encrypt(const char *pass, totp_cfg_t *cfg);
+
+/* descifra cfg->blob en cfg->secret y cfg->scratch. Devuelve
+ * TOTP_ERR_PERM si la contrasena es incorrecta o el archivo fue alterado */
+totp_err_t totp_decrypt(const char *pass, totp_cfg_t *cfg);
 
 #endif /* TOTP_COMMON_H */

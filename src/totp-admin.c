@@ -14,11 +14,12 @@
 #include <errno.h>
 #include <limits.h>
 #include <sys/wait.h>
+#include <termios.h>
 #include "totp_common.h"
 
 #define ISSUER "Lab1_TSI-G08"
 
-/* dibuja el QR invocando qrencode(1). */
+/* dibuja el QR invocando qrencode(). */
 static int draw_qr(const char *uri) {
     pid_t pid = fork();
     int status;
@@ -40,6 +41,8 @@ int main(void) {
     struct passwd *pw;
     char path[PATH_MAX];
     char uri[512];
+    char pass[256];
+    char *p;
     totp_err_t e;
     int i;
 
@@ -78,15 +81,37 @@ int main(void) {
         }
     }
 
+    /* contrasena para cifrar el seed
+     * Tiene que ser la misma con la que el usuario entra al sistema
+     * La pedimos dos veces para asegurarse de que el usuario la escriba bien */
+    p = getpass("Contrasena de tu cuenta (para cifrar el seed): ");
+    if (p == NULL || *p == '\0') {
+        fprintf(stderr, "error: contrasena vacia\n");
+        return 1;
+    }
+    snprintf(pass, sizeof pass, "%s", p);
+    totp_wipe(p, strlen(p));
+
+    p = getpass("Repetila: ");
+    if (p == NULL || strcmp(pass, p) != 0) {
+        fprintf(stderr, "error: las contrasenas no coinciden\n");
+        if (p != NULL) totp_wipe(p, strlen(p));
+        totp_wipe(pass, sizeof pass);
+        return 1;
+    }
+    totp_wipe(p, strlen(p));
+
     /* generamos seed */
     e = totp_generate(&cfg);
     if (e != TOTP_OK) {
         fprintf(stderr, "error: %s\n", totp_strerror(e));
+        totp_wipe(pass, sizeof pass);
         return 1;
     }
 
     /* guardamos en el archivo del usuario */
     e = totp_save(path, &cfg);
+    totp_wipe(pass, sizeof pass);
     if (e != TOTP_OK) {
         fprintf(stderr, "error: no se pudo escribir %s: %s\n", path, strerror(errno));
         totp_wipe(&cfg, sizeof cfg);

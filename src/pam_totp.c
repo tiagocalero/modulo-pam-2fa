@@ -15,6 +15,7 @@
 
 #define _GNU_SOURCE
 #define PAM_SM_AUTH
+/* #define PAM_SM_PASSWORD    /* para recifrar el seed en cambio de contrasenia */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -96,6 +97,7 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, cons
     totp_params_t params;
     totp_cfg_t cfg;
     const char *user = NULL;
+    /* const char *pass = NULL; */
     struct passwd *pw;
     char path[PATH_MAX];
     char *code = NULL;
@@ -138,6 +140,12 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, cons
 
     if (totp_path(path, sizeof path, pw->pw_dir) != 0) return PAM_AUTHINFO_UNAVAIL;
 
+    /* obtiene la contrasenia para descifrar el seed */
+    if (pam_get_item(pamh, PAM_AUTHTOK, (const void **) &pass) != PAM_SUCCESS || pass == NULL || *pass == '\0') {
+        pam_syslog(pamh, LOG_ERR, "no hay contrasenia disponible para descifrar el seed de %s", user);
+        return PAM_AUTHINFO_UNAVAIL;
+    }
+
     if (debug)
         pam_syslog(pamh, LOG_DEBUG, "user=%s archivo=%s algo=%s digits=%d period=%d window=%d",
                    user, path, totp_algo_name(params.algo), params.digits,
@@ -148,7 +156,7 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, cons
     if (dropped < 0) return PAM_AUTHINFO_UNAVAIL;
 
     /* carga la config */
-    terr = totp_load(path, pw->pw_uid, &cfg);
+    terr = totp_load(path, pw->pw_uid, pass, &cfg);
 
     if (dropped == 0) restore_privs(ouid, ogid);
 
@@ -160,6 +168,15 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, cons
         pam_syslog(pamh, LOG_NOTICE, "%s sin 2FA y sin nullok", user);
         return PAM_AUTH_ERR;
     }
+
+    if (terr == TOTP_ERR_PERM && cfg.bloblen > 0) {
+        /* GCM rechazo la etiqueta entonces la contrasena no coincide con la que
+         * cifro el seed, o alguien altero el archivo. */
+        pam_syslog(pamh, LOG_ERR, "no se pudo descifrar el seed de %s. "
+                   "La contrasena no coincide con la que lo cifro, o el archivo fue alterado", user);
+        return PAM_AUTHINFO_UNAVAIL;
+    }
+
     if (terr != TOTP_OK) {
         pam_syslog(pamh, LOG_ERR, "no se pudo leer %s: %s", path, totp_strerror(terr));
         return PAM_AUTHINFO_UNAVAIL;
@@ -212,14 +229,13 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, cons
     rc = PAM_SUCCESS;
 
 out:
-    /* se guarda en todos los caminos que llegaron a contar un intento, no
-     * solo en el exitoso: si el contador no se persistiera, el limite se
-     * reiniciaria en cada conexion nueva y no serviria de nada. */
+    /* se guarda en todos los caminos que llegaron a contar un intento no solo en el exitoso */
     if (need_save) {
         int d2 = drop_privs(pamh, pw->pw_uid, pw->pw_gid, &ouid, &ogid);
-
         if (d2 >= 0) {
-            totp_err_t werr = totp_save(path, &cfg);
+            /* solo hace falta volver a cifrar si se consumio un codigo de recuperacion.
+             * En el resto de los casos alcanza con reescribir los contadores */
+            totp_err_t werr = totp_save(path, used_scratch ? pass : NULL, &cfg);
             if (d2 == 0) restore_privs(ouid, ogid);
             if (werr != TOTP_OK) pam_syslog(pamh, LOG_WARNING, "no se pudo actualizar %s", path);
         }
