@@ -18,13 +18,7 @@
 
 #define ISSUER "Lab1_TSI-G08"
 
-/* Dibuja el QR invocando qrencode(1).
- *
- * Usamos fork()+execlp() y NO system(): la URI contiene '&', '?' y ':'.
- * Con system() la cadena pasaria por un shell, que interpretaria los '&'
- * como "ejecutar en segundo plano" y partiria el comando. Con execlp() la
- * URI viaja como un argumento aislado que nadie interpreta.
- */
+/* dibuja el QR invocando qrencode(1). */
 static int draw_qr(const char *uri) {
     pid_t pid = fork();
     int status;
