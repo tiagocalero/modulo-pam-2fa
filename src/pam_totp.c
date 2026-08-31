@@ -15,7 +15,6 @@
 
 #define _GNU_SOURCE
 #define PAM_SM_AUTH
-/* #define PAM_SM_PASSWORD    /* para recifrar el seed en cambio de contrasenia */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -97,7 +96,7 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, cons
     totp_params_t params;
     totp_cfg_t cfg;
     const char *user = NULL;
-    /* const char *pass = NULL; */
+    const char *pass = NULL;
     struct passwd *pw;
     char path[PATH_MAX];
     char *code = NULL;

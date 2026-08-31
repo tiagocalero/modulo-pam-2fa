@@ -138,8 +138,7 @@ int main(void) {
     }
 
     /* guardamos en el archivo del usuario */
-    e = totp_save(path, &cfg);
-    totp_wipe(pass, sizeof pass);
+    e = totp_save(path, pass, &cfg);
     if (e != TOTP_OK) {
         fprintf(stderr, "error: no se pudo escribir %s: %s\n", path, strerror(errno));
         totp_wipe(&cfg, sizeof cfg);
