@@ -50,7 +50,7 @@ install: all
 
 uninstall:
 	rm -f $(SECURITYDIR)/$(MODULE) $(BINDIR)/$(TOOL)
-	@echo "Recorda borrar la linea de /etc/pam.d/sshd."
+	@echo "Acordate de borrar la linea de /etc/pam.d/sshd"
 	@echo "$(CONFFILE) y los ~/.totp_auth NO se borraron."
 
 clean:
