@@ -108,7 +108,7 @@ totp_err_t totp_params_load(const char *path, totp_params_t *params) {
         return TOTP_ERR_IO;
     }
 
-    /* chequeo para que solo el root pueda cambiar los parametros */
+    /* chequeo la integridad de los permisos del archivo para que solo el root pueda cambiar los parametros */
     if (!S_ISREG(st.st_mode) || st.st_uid != 0 || (st.st_mode & (S_IWGRP | S_IWOTH)) != 0) {
         close(fd);
         return TOTP_ERR_PERM;
@@ -212,7 +212,7 @@ totp_err_t totp_load(const char *path, uid_t owner, const char *pass, totp_cfg_t
         return TOTP_ERR_IO;
     }
 
-    /* chequeos sobre el descriptor ya abierto */
+    /* chequeo la integridad de los permisos del archivo */
     if (!S_ISREG(st.st_mode)  /* archivo regular */
         || st.st_uid != owner /* del usuario */
         || (st.st_mode & (S_IRWXG | S_IRWXO)) != 0) /* solo el dueño */
