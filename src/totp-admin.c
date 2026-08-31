@@ -14,10 +14,43 @@
 #include <errno.h>
 #include <limits.h>
 #include <sys/wait.h>
-#include <termios.h>
+#include <security/pam_appl.h>
 #include "totp_common.h"
 
 #define ISSUER "Lab1_TSI-G08"
+
+/* funcion de conversacion para PAM
+ * PAM va a pedir la contrasena; en vez de preguntarle otra vez al usuario,
+ * le devolvemos la que ya ingreso, pasada por appdata_ptr. */
+static int conv_pass(int n, const struct pam_message **msg, struct pam_response **resp, void *appdata) {
+    struct pam_response *r = calloc((size_t) n, sizeof *r);
+    int i;
+    if (r == NULL) return PAM_BUF_ERR;
+
+    for (i = 0; i < n; i++)
+        if (msg[i]->msg_style == PAM_PROMPT_ECHO_OFF)
+            r[i].resp = strdup((const char *) appdata);
+
+    *resp = r;
+    return PAM_SUCCESS;
+}
+
+/* verifica que 'pass' sea realmente la contrasena de 'user'.
+ *
+ * No lee /etc/shadow, se lo pedimos a PAM, que para eso delega en /usr/sbin/unix_chkpwd.
+ * Devuelve 0 si la contrasena es correcta, -1 si no. */
+static int check_pass(const char *user, const char *pass) {
+    struct pam_conv conv = { conv_pass, (void *) pass };
+    pam_handle_t *h = NULL;
+    int rc;
+
+    if (pam_start("totp-admin", user, &conv, &h) != PAM_SUCCESS) return -1;
+
+    rc = pam_authenticate(h, PAM_DISALLOW_NULL_AUTHTOK);
+    pam_end(h, rc);
+
+    return (rc == PAM_SUCCESS) ? 0 : -1;
+}
 
 /* dibuja el QR invocando qrencode(). */
 static int draw_qr(const char *uri) {
@@ -81,9 +114,6 @@ int main(void) {
         }
     }
 
-    /* contrasena para cifrar el seed
-     * Tiene que ser la misma con la que el usuario entra al sistema
-     * La pedimos dos veces para asegurarse de que el usuario la escriba bien */
     p = getpass("Contrasena de tu cuenta (para cifrar el seed): ");
     if (p == NULL || *p == '\0') {
         fprintf(stderr, "error: contrasena vacia\n");
@@ -92,14 +122,12 @@ int main(void) {
     snprintf(pass, sizeof pass, "%s", p);
     totp_wipe(p, strlen(p));
 
-    p = getpass("Repetila: ");
-    if (p == NULL || strcmp(pass, p) != 0) {
-        fprintf(stderr, "error: las contrasenas no coinciden\n");
-        if (p != NULL) totp_wipe(p, strlen(p));
+    /* verificamos antes de generar */
+    if (check_pass(pw->pw_name, pass) != 0) {
+        fprintf(stderr, "error: la contrasena no es correcta\n");
         totp_wipe(pass, sizeof pass);
         return 1;
     }
-    totp_wipe(p, strlen(p));
 
     /* generamos seed */
     e = totp_generate(&cfg);

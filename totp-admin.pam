@@ -1,0 +1,7 @@
+# /etc/pam.d/totp-admin
+#
+# Servicio que usa totp-admin para verificar que la contrasena ingresada
+# sea la real del usuario, antes de cifrar el seed con ella.
+
+auth     required   pam_unix.so
+account  required   pam_unix.so

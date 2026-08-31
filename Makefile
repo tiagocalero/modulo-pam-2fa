@@ -30,12 +30,13 @@ $(MODULE): $(SRC)/pam_totp.c $(SRC)/totp_common.c $(SRC)/totp_crypto.c $(SRC)/to
 	$(CC) $(CFLAGS) -fPIC -shared -o $@ $(SRC)/pam_totp.c $(SRC)/totp_common.c $(SRC)/totp_crypto.c -lpam -lcotp -lgcrypt
 
 $(TOOL): $(SRC)/totp-admin.c $(SRC)/totp_common.c $(SRC)/totp_crypto.c $(SRC)/totp_common.h
-	$(CC) $(CFLAGS) -o $@ $(SRC)/totp-admin.c $(SRC)/totp_common.c $(SRC)/totp_crypto.c -lcotp -lgcrypt
+	$(CC) $(CFLAGS) -o $@ $(SRC)/totp-admin.c $(SRC)/totp_common.c $(SRC)/totp_crypto.c -lpam -lcotp -lgcrypt
 
 install: all
 	@if [ "$$(id -u)" != "0" ]; then echo "ERROR: usa sudo"; exit 1; fi
 	install -m 0644 $(MODULE) $(SECURITYDIR)/
 	install -m 0755 $(TOOL) $(BINDIR)/
+	install -m 0644 totp-admin.pam /etc/pam.d/totp-admin
 	@if [ -f $(CONFFILE) ]; then \
 	    echo "  ($(CONFFILE) ya existe)"; \
 	else \
