@@ -13,7 +13,7 @@ Arch, que difieren en varios puntos importantes.
 > Una configuración incorrecta de PAM puede dejarte **sin acceso a la
 > máquina**.
 >
-> 1. Tomá un **snapshot** de la VM.
+> 1. Tomá una **snapshot** si estas en una VM.
 > 2. Dejá una **sesión root abierta en otra terminal** y no la cierres
 >    hasta haber verificado que podés entrar.
 > 3. Tené a mano la **consola gráfica** de la VM.
