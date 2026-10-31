@@ -127,6 +127,6 @@ sudo sshd -t && sudo systemctl restart ssh
 > you can still log in, and snapshot the VM first.
 
 On Fedora, libcotp is not packaged and has to be built from source.
-[INSTALL.md](docs/INSTALL.md) covers that, plus Arch, SELinux, the per-distro
+[INFO.md](docs/INFO.md) covers that, plus Arch, SELinux, the per-distro
 differences in `/etc/pam.d/sshd`, a troubleshooting table and recovery
 procedures.
